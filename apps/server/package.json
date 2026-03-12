@@ -17,6 +17,7 @@
     "db:push:test": "prisma db push --force-reset --skip-generate"
   },
   "dependencies": {
+    "@openai/codex": "^0.114.0",
     "@prisma/client": "^6.19.2",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",

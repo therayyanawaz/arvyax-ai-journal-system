@@ -1,23 +1,43 @@
 # ArvyaX AI-Assisted Journal System
 
-## Project Overview
-This repository contains a full-stack submission for the ArvyaX AI-Assisted Journal System assignment. Users can:
+A small full-stack journal app for immersive nature sessions. Users can create entries, review their history, analyze entries with a real AI provider, and inspect aggregated insights over time.
 
-- create journal entries after forest, ocean, or mountain sessions
-- fetch previous entries by user
-- analyze journal text with a real OpenAI-compatible LLM
-- review aggregate insights computed from stored entries and stored analyses
+The project ships with two backend AI providers:
 
-The app is structured as a small npm-workspace monorepo and is ready to run locally without manual patching.
+- `openaiApi`: standard backend API-key integration. This is the recommended production default.
+- `codexChatgpt`: OpenClaw-style browser login using the official Codex app-server account flow. This is designed for trusted/local rich-client style usage, not a public multi-user SaaS default.
 
-## Stack Choice
+## Stack
+
 - Backend: Node.js, Express, TypeScript
 - Frontend: React, TypeScript, Vite
 - Database: SQLite with Prisma ORM
-- LLM integration: OpenAI Node SDK against a configurable OpenAI-compatible base URL
-- Tests: Vitest + Supertest backend integration tests
+- AI providers:
+  - OpenAI-compatible API provider using `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `LLM_MODEL`
+  - Bundled official `@openai/codex` app-server adapter for ChatGPT browser login
+
+## Project Overview
+
+Core assignment APIs:
+
+- `POST /api/journal`
+- `GET /api/journal/:userId`
+- `POST /api/journal/analyze`
+- `GET /api/journal/insights/:userId`
+
+Additional reviewer-friendly APIs:
+
+- `GET /api/ai/provider`
+- `POST /api/ai/provider`
+- `POST /api/auth/codex/start`
+- `GET /api/auth/codex/status/:loginId`
+- `GET /api/auth/codex/account`
+- `POST /api/auth/codex/logout`
+
+Analysis results are persisted in SQLite and cached by normalized text hash so repeated analysis does not re-bill the provider.
 
 ## Exact Folder Structure
+
 ```text
 .
 ├── AGENTS.md
@@ -40,248 +60,164 @@ The app is structured as a small npm-workspace monorepo and is ready to run loca
 │       ├── package.json
 │       ├── prisma
 │       │   ├── migrations
-│       │   │   ├── 20260312153301_init
-│       │   │   │   └── migration.sql
-│       │   │   └── 20260312154709_init
-│       │   │       └── migration.sql
-│       │   ├── migration_lock.toml
 │       │   └── schema.prisma
-│       ├── src
-│       │   ├── config
-│       │   │   └── env.ts
-│       │   ├── controllers
-│       │   │   ├── baseController.ts
-│       │   │   └── journalController.ts
-│       │   ├── lib
-│       │   │   └── prisma.ts
-│       │   ├── middleware
-│       │   │   └── errorHandler.ts
-│       │   ├── repositories
-│       │   │   └── journalRepository.ts
-│       │   ├── routes
-│       │   │   └── journalRoutes.ts
-│       │   ├── scripts
-│       │   │   ├── seed.ts
-│       │   │   └── verifyEndpoints.ts
-│       │   ├── services
-│       │   │   ├── analysisService.ts
-│       │   │   └── journalService.ts
-│       │   ├── tests
-│       │   │   ├── journalApi.test.ts
-│       │   │   └── setup.ts
-│       │   ├── types
-│       │   │   └── journal.ts
-│       │   ├── utils
-│       │   │   ├── appError.ts
-│       │   │   └── hash.ts
-│       │   ├── validators
-│       │   │   └── journalSchemas.ts
-│       │   ├── app.ts
-│       │   └── server.ts
-│       ├── tsconfig.build.json
-│       ├── tsconfig.json
-│       └── vitest.config.ts
-├── docs
-│   └── plans
-└── package.json
+│       └── src
+│           ├── ai
+│           │   ├── codexAppServer
+│           │   │   ├── client.ts
+│           │   │   └── types.ts
+│           │   ├── providers
+│           │   │   ├── codexChatgptProvider.ts
+│           │   │   └── openaiApiProvider.ts
+│           │   ├── providerFactory.ts
+│           │   └── types.ts
+│           ├── controllers
+│           ├── middleware
+│           ├── repositories
+│           ├── routes
+│           ├── scripts
+│           ├── services
+│           ├── tests
+│           ├── types
+│           ├── utils
+│           ├── validators
+│           ├── app.ts
+│           └── server.ts
+├── package.json
+├── package-lock.json
+└── tsconfig.base.json
 ```
-
-## Local Developer Experience
-- npm workspaces only
-- backend port: `4000`
-- frontend port: `5173`
-- root scripts delegate to workspace scripts
 
 ## Environment Variables
-Copy the examples first:
+
+Backend sample:
 
 ```bash
-cp apps/server/.env.example apps/server/.env
-cp apps/client/.env.example apps/client/.env
-```
-
-### Sample `apps/server/.env`
-```bash
+# apps/server/.env
 DATABASE_URL="file:./prisma/dev.db"
 PORT=4000
-OPENAI_API_KEY="sk-your-real-provider-key"
+
+# Safe default for deployments
+AI_PROVIDER="openaiApi"
+
+# Enable only if you want the bundled Codex ChatGPT browser-login adapter
+CODEX_PROVIDER_ENABLED="false"
+
+OPENAI_API_KEY="sk-your-key"
 OPENAI_BASE_URL="https://api.openai.com/v1"
 LLM_MODEL="gpt-4.1-mini"
 ```
 
-### Sample `apps/client/.env`
+Frontend sample:
+
 ```bash
+# apps/client/.env
 VITE_API_BASE_URL="http://localhost:4000"
 ```
 
-Notes:
-- If LLM env vars are missing, `POST /api/journal/analyze` returns a real `500` error response. It never returns fake analysis.
-- The app still runs without LLM env vars, so reviewers can inspect create/list/insights flows locally.
-
 ## Setup
+
 ```bash
 npm install
+cp apps/server/.env.example apps/server/.env
+cp apps/client/.env.example apps/client/.env
 npm run db:generate
 npm run db:migrate
 npm run seed
 ```
 
 ## Run Locally
-Run both apps:
+
+Run backend and frontend together:
 
 ```bash
 npm run dev
 ```
 
-Run separately:
+Or separately:
 
 ```bash
 npm run dev:server
 npm run dev:client
 ```
 
-Open:
-- frontend: `http://localhost:5173`
-- backend: `http://localhost:4000`
+Frontend:
 
-## Available Commands
+- `http://localhost:5173`
+
+Backend:
+
+- `http://localhost:4000`
+
+## Development-only Screenshots Placeholder
+
+Add screenshots here before submission if desired:
+
+- journal form
+- provider selector and ChatGPT sign-in panel
+- analyzed entry with persisted insights
+
+## Codex ChatGPT Login Mode
+
+`codexChatgpt` uses the official Codex app-server account flow, not a website OAuth system you build yourself.
+
+Flow:
+
+1. The frontend calls `POST /api/auth/codex/start`.
+2. The backend asks the bundled Codex app-server to begin `account/login/start` with `type: "chatgpt"`.
+3. The backend returns `{ loginId, authUrl }`.
+4. The frontend opens `authUrl` in the browser.
+5. Codex handles the local callback and emits `account/login/completed` and `account/updated`.
+6. The frontend polls `GET /api/auth/codex/status/:loginId` and refreshes `GET /api/auth/codex/account`.
+7. The `codexChatgpt` provider can then be used for `POST /api/journal/analyze`.
+
+Important:
+
+- end users do not manually install Codex CLI globally for this repo
+- the backend bundles the official `@openai/codex` package through `npm install`
+- the frontend never sees tokens or auth files
+- no token copy/paste flow exists in this app
+- this is best suited to trusted/local deployments where the backend can own a local browser callback
+- for a normal public multi-user SaaS deployment, use `openaiApi`
+
+## OpenAI API Mode
+
+`openaiApi` is the normal backend-managed provider:
+
+- no browser login
+- no local Codex session
+- credentials stay on the backend
+- easier to operate in server environments and public deployments
+
+Set:
+
 ```bash
-npm install
-npm run db:generate
-npm run db:migrate
-npm run db:studio
-npm run seed
-npm run verify:endpoints
-npm test
-npm run build
-npm run dev
-npm run dev:server
-npm run dev:client
+AI_PROVIDER="openaiApi"
+OPENAI_API_KEY="..."
+OPENAI_BASE_URL="https://api.openai.com/v1"
+LLM_MODEL="gpt-4.1-mini"
 ```
 
-## API Contract
+## Provider Switching
+
+The frontend selector talks to:
+
+- `GET /api/ai/provider`
+- `POST /api/ai/provider`
+
+Behavior:
+
+- a provider may be selectable but not yet ready
+- `codexChatgpt` is selectable when the bundled adapter is available
+- `codexChatgpt` becomes ready only after ChatGPT sign-in succeeds
+- `openaiApi` becomes ready only when backend env vars are configured
+
+## API Usage
 
 ### `POST /api/journal`
-- success: `201`
-- invalid input: `400`
 
 Request:
-```json
-{
-  "userId": "123",
-  "ambience": "forest",
-  "text": "I felt calm today after listening to the rain."
-}
-```
 
-Sample success response:
-```json
-{
-  "id": "cmmnms8wb00004pbtficuryha",
-  "userId": "123",
-  "ambience": "forest",
-  "text": "I felt calm today after listening to the rain.",
-  "createdAt": "2026-03-12T15:36:53.003Z",
-  "analysis": null
-}
-```
-
-### `GET /api/journal/:userId`
-- success: `200`
-
-Sample success response:
-```json
-[
-  {
-    "id": "cmmnms8wb00004pbtficuryha",
-    "userId": "123",
-    "ambience": "forest",
-    "text": "I felt calm today after listening to the rain.",
-    "createdAt": "2026-03-12T15:36:53.003Z",
-    "analysis": null
-  }
-]
-```
-
-### `POST /api/journal/analyze`
-- success: `200`
-- invalid input: `400`
-- missing referenced entry: `404`
-- missing LLM config or upstream analysis failure: `500`
-
-Request:
-```json
-{
-  "journalEntryId": "ENTRY_ID_HERE",
-  "text": "I felt calm today after listening to the rain."
-}
-```
-
-Sample success response:
-```json
-{
-  "emotion": "calm",
-  "keywords": ["rain", "nature", "peace"],
-  "summary": "The entry reflects relaxation after a nature session."
-}
-```
-
-Sample error response:
-```json
-{
-  "error": {
-    "code": "LLM_UNAVAILABLE",
-    "message": "LLM configuration is missing. Set OPENAI_API_KEY, OPENAI_BASE_URL, and LLM_MODEL."
-  }
-}
-```
-
-### `GET /api/journal/insights/:userId`
-- success: `200`
-
-Sample success response:
-```json
-{
-  "totalEntries": 3,
-  "topEmotion": "calm",
-  "mostUsedAmbience": "forest",
-  "recentKeywords": ["rain", "nature", "focus"]
-}
-```
-
-### Standard Error Shape
-```json
-{
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Request validation failed."
-  }
-}
-```
-
-## Validation Rules
-- `userId`: required non-empty string
-- `ambience`: required and normalized to one of `forest`, `ocean`, `mountain`
-- `text`: required, trimmed, minimum `5` characters
-
-## Analysis Persistence and Caching
-- analysis results are stored in the database even for raw-text analysis requests
-- a SHA-256 `textHash` is stored with every persisted analysis
-- repeated text analysis checks persisted results before any upstream LLM call
-- the analyze endpoint accepts raw text and also associates an analysis with a stored journal entry when `journalEntryId` is provided
-
-## Seed Data
-Populate demo entries for `demo-user` and `review-user`:
-
-```bash
-npm run seed
-```
-
-This seeds journal entries only. It does not fabricate LLM analyses.
-
-## Sample curl Requests
-
-Create entry:
 ```bash
 curl -X POST http://localhost:4000/api/journal \
   -H "Content-Type: application/json" \
@@ -292,12 +228,44 @@ curl -X POST http://localhost:4000/api/journal \
   }'
 ```
 
-Get entries:
+Sample response:
+
+```json
+{
+  "id": "clx...",
+  "userId": "123",
+  "ambience": "forest",
+  "text": "I felt calm today after listening to the rain.",
+  "createdAt": "2026-03-12T16:00:00.000Z",
+  "analysis": null
+}
+```
+
+### `GET /api/journal/:userId`
+
 ```bash
 curl http://localhost:4000/api/journal/123
 ```
 
-Analyze text:
+Sample response:
+
+```json
+[
+  {
+    "id": "clx...",
+    "userId": "123",
+    "ambience": "forest",
+    "text": "I felt calm today after listening to the rain.",
+    "createdAt": "2026-03-12T16:00:00.000Z",
+    "analysis": null
+  }
+]
+```
+
+### `POST /api/journal/analyze`
+
+Analyze raw text:
+
 ```bash
 curl -X POST http://localhost:4000/api/journal/analyze \
   -H "Content-Type: application/json" \
@@ -306,7 +274,8 @@ curl -X POST http://localhost:4000/api/journal/analyze \
   }'
 ```
 
-Analyze a stored entry:
+Analyze and associate with a stored entry:
+
 ```bash
 curl -X POST http://localhost:4000/api/journal/analyze \
   -H "Content-Type: application/json" \
@@ -316,19 +285,140 @@ curl -X POST http://localhost:4000/api/journal/analyze \
   }'
 ```
 
-Get insights:
+Sample response:
+
+```json
+{
+  "emotion": "calm",
+  "keywords": ["rain", "focus", "nature"],
+  "summary": "The entry reflects calm after a nature session."
+}
+```
+
+### `GET /api/journal/insights/:userId`
+
 ```bash
 curl http://localhost:4000/api/journal/insights/123
 ```
 
-## Verification
-Automated backend tests cover each required endpoint:
-- `POST /api/journal`
-- `GET /api/journal/:userId`
-- `POST /api/journal/analyze`
-- `GET /api/journal/insights/:userId`
+Sample response:
 
-Submission verification checklist:
+```json
+{
+  "totalEntries": 3,
+  "topEmotion": "calm",
+  "mostUsedAmbience": "forest",
+  "recentKeywords": ["rain", "focus", "nature"]
+}
+```
+
+### `GET /api/ai/provider`
+
+```bash
+curl http://localhost:4000/api/ai/provider
+```
+
+Sample response:
+
+```json
+{
+  "activeProvider": "openaiApi",
+  "providers": [
+    {
+      "name": "openaiApi",
+      "label": "OpenAI API",
+      "selected": true,
+      "available": true,
+      "ready": true,
+      "reason": null
+    },
+    {
+      "name": "codexChatgpt",
+      "label": "Codex ChatGPT",
+      "selected": false,
+      "available": false,
+      "ready": false,
+      "reason": "Codex ChatGPT provider is disabled. Set CODEX_PROVIDER_ENABLED=true to enable it."
+    }
+  ]
+}
+```
+
+### `POST /api/auth/codex/start`
+
+```bash
+curl -X POST http://localhost:4000/api/auth/codex/start
+```
+
+Sample response:
+
+```json
+{
+  "loginId": "f90c2f1d-...",
+  "authUrl": "https://chatgpt.com/..."
+}
+```
+
+### `GET /api/auth/codex/status/:loginId`
+
+```bash
+curl http://localhost:4000/api/auth/codex/status/f90c2f1d-...
+```
+
+Sample response:
+
+```json
+{
+  "loginId": "f90c2f1d-...",
+  "status": "pending",
+  "error": null,
+  "authUrl": "https://chatgpt.com/..."
+}
+```
+
+### `GET /api/auth/codex/account`
+
+```bash
+curl http://localhost:4000/api/auth/codex/account
+```
+
+Sample response:
+
+```json
+{
+  "enabled": true,
+  "available": true,
+  "ready": true,
+  "authStatus": "signed-in",
+  "authMode": "chatgpt",
+  "email": "user@example.com",
+  "planType": "plus",
+  "requiresOpenaiAuth": true,
+  "rateLimits": null,
+  "availabilityReason": null,
+  "activeLoginId": null
+}
+```
+
+### Standard Error Shape
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Human-readable message"
+  }
+}
+```
+
+## Validation Rules
+
+- `userId`: required non-empty string
+- `ambience`: required and must be one of `forest`, `ocean`, `mountain`
+- `text`: required, trimmed, minimum 5 characters
+
+## Verification Commands
+
 ```bash
 npm install
 npm run db:generate
@@ -339,45 +429,58 @@ npm test
 npm run build
 ```
 
-Verified locally in this workspace:
-- dependency install
-- Prisma client generation
-- migration application
-- seed execution
-- scripted HTTP endpoint verification
-- automated backend tests
-- backend build
-- frontend build
-
-## Screenshots Placeholder
-Add screenshots here before external submission packaging if desired:
-
-- Placeholder: main journal page at `http://localhost:5173`
-- Placeholder: populated entries list with stored analyses
-- Placeholder: insights panel after analyzing seeded entries
-
 ## Troubleshooting
 
-### `POST /api/journal/analyze` returns `500`
-This is expected if `OPENAI_API_KEY`, `OPENAI_BASE_URL`, or `LLM_MODEL` are missing or invalid.
+### Codex provider is disabled in the UI
 
-### Prisma migration issues
-Re-run:
-```bash
-npm run db:generate
-npm run db:migrate
-```
+- set `CODEX_PROVIDER_ENABLED="true"` in `apps/server/.env`
+- restart the backend
+- run `npm install` if the bundled `@openai/codex` package is missing
 
-### Port already in use
-- backend must run on `4000`
-- frontend must run on `5173`
-- stop the conflicting process or change your local environment before starting the app
+### ChatGPT sign-in window opens but login never completes
 
-### Seed command does not appear to change anything
-The seed script resets demo users and re-inserts the same sample entries. Query `demo-user` from the UI or API to confirm the seeded data.
+- verify the backend is running locally on `http://localhost:4000`
+- retry the login from the auth panel
+- check backend logs for Codex app-server startup or callback errors
+- remember this flow expects trusted/local callback semantics
+
+### Codex provider stays unavailable
+
+- confirm `npm install` completed successfully
+- confirm your environment supports the official `@openai/codex` package
+- call `GET /api/auth/codex/account` and inspect `availabilityReason`
+
+### OpenAI API mode is selected but analysis fails
+
+- confirm `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `LLM_MODEL` are set on the backend
+- verify the selected provider through `GET /api/ai/provider`
+
+### Invalid JSON returned from an AI provider
+
+- the backend validates and normalizes the final payload
+- retry once
+- if the issue persists, inspect backend logs and switch providers if needed
 
 ## Assumptions and Tradeoffs
-- Authentication is out of scope, so `userId` is provided directly.
-- SQLite is used for local portability and fast review; the scale path is documented in [ARCHITECTURE.md](/home/tariqul/Documents/GitHub/arvyax-ai-journal-system/ARCHITECTURE.md).
-- The frontend stays intentionally small and focused on the assignment flows.
-- The system never returns fake LLM output. If the model cannot be used, the API returns a real error instead.
+
+- the app intentionally has no end-user auth system because the assignment did not require it
+- journal ownership is keyed by `userId` supplied by the caller
+- Codex ChatGPT login is modeled as a backend-owned local/trusted session, not a public multi-user account system
+- SQLite is correct for local development and assignment review; production scale would move to PostgreSQL
+- repeated analysis is cached by text hash to avoid duplicate provider cost
+
+## Pre-production Checklist
+
+- set `AI_PROVIDER="openaiApi"`
+- configure `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `LLM_MODEL`
+- verify `CODEX_PROVIDER_ENABLED="false"` unless you explicitly want the local/trusted Codex flow
+- verify no local auth artifacts or copied secrets are committed
+- run `npm run verify:endpoints`
+- run `npm test`
+- run `npm run build`
+
+## Limitations
+
+- `codexChatgpt` depends on local browser-login semantics and is therefore not the default recommendation for public multi-user SaaS hosting
+- the app does not implement user authentication or authorization
+- rate-limit metadata from Codex is best-effort optional UI metadata, not a billing system

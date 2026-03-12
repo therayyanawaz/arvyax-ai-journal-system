@@ -1,100 +1,250 @@
 # Architecture
 
-## Current Design
-The submission is a modular monorepo with:
-- `apps/server`: Express API with route, controller, service, and repository layers
-- `apps/client`: React single-page frontend
-- Prisma + SQLite for local persistence
+## Current System
 
-### Core Data Model
-- `JournalEntry`
-  - stores `userId`, `ambience`, `text`, and `createdAt`
-- `JournalAnalysis`
-  - stores optional `journalEntryId`, `emotion`, `keywordsJson`, `summary`, `textHash`, and `createdAt`
+The repo is a small monorepo with:
 
-### Request Flow
-1. The frontend creates a journal entry through `POST /api/journal`.
-2. The server validates input with Zod and writes the entry with Prisma.
-3. The frontend lists entries through `GET /api/journal/:userId`.
-4. When analysis is requested, the server:
-   - checks whether the entry already has an analysis
-   - checks for a cached analysis by `textHash`
-   - only calls the upstream LLM if neither exists
-   - validates the LLM response as strict JSON
-   - stores the analysis for future insight queries or future raw-text cache hits
-5. Insights are computed from stored entries and stored analyses through `GET /api/journal/insights/:userId`.
+- `apps/server`: Express + TypeScript API
+- `apps/client`: React + TypeScript + Vite SPA
+- Prisma + SQLite persistence
+- a shared AI provider abstraction
 
-### Current Operational Guarantees
-- Handled failures use one JSON error shape:
-  - `400` for invalid input
-  - `404` for a missing referenced entry
-  - `500` for unexpected server failures and LLM-unavailable cases
-- Validation is centralized:
-  - `userId` must be non-empty
-  - `ambience` must be `forest`, `ocean`, or `mountain`
-  - `text` is trimmed and must be at least 5 characters
-- Raw-text analysis results are persisted even before they are attached to a journal entry.
-- Cached analyses are linked to stored journal entries later when `journalEntryId` is supplied.
-- A scripted endpoint verifier exercises all required endpoints over real HTTP for local review.
+Backend layering stays simple and explicit:
 
-## 1. How Would This Scale to 100k Users?
-For 100k users, I would keep the same logical boundaries and change the infrastructure around them:
+- routes
+- controllers
+- services
+- repositories
 
-- Move from SQLite to PostgreSQL.
-- Add connection pooling and read indexes for:
-  - `JournalEntry(userId, createdAt DESC)`
+## Data Model
+
+### `JournalEntry`
+
+- `id`
+- `userId`
+- `ambience`
+- `text`
+- `createdAt`
+
+### `JournalAnalysis`
+
+- `id`
+- `journalEntryId` nullable for raw-text cache entries
+- `emotion`
+- `keywordsJson`
+- `summary`
+- `textHash`
+- `createdAt`
+
+## Provider Abstraction
+
+The rest of the backend depends on a shared provider interface and runtime selection layer:
+
+- `apps/server/src/ai/types.ts`
+- `apps/server/src/ai/providerFactory.ts`
+- `apps/server/src/ai/providers/openaiApiProvider.ts`
+- `apps/server/src/ai/providers/codexChatgptProvider.ts`
+
+### `openaiApi`
+
+- standard backend API-key flow
+- uses `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `LLM_MODEL`
+- recommended production runtime path
+
+### `codexChatgpt`
+
+- uses the official Codex app-server account flow
+- starts ChatGPT-managed browser login with `account/login/start`
+- receives `account/login/completed` and `account/updated`
+- keeps auth artifacts on the backend side only
+- is best suited to trusted/local rich-client style deployments
+
+## Codex ChatGPT Browser Login
+
+This app models an OpenClaw-style UX:
+
+1. frontend calls `POST /api/auth/codex/start`
+2. backend sends `account/login/start` with `{ "type": "chatgpt" }`
+3. Codex app-server returns `{ loginId, authUrl }`
+4. frontend opens `authUrl`
+5. Codex app-server hosts the local callback and completes ChatGPT-managed auth
+6. backend tracks `account/login/completed`
+7. frontend polls `GET /api/auth/codex/status/:loginId`
+8. frontend refreshes `GET /api/auth/codex/account`
+9. journal analysis can use the authenticated Codex-backed session
+
+Implementation files:
+
+- `apps/server/src/ai/codexAppServer/client.ts`
+- `apps/server/src/ai/codexAppServer/types.ts`
+
+## Why Codex ChatGPT Login Is Not The Default SaaS Production Path
+
+The Codex ChatGPT browser-login mode intentionally uses local callback semantics and a backend-owned app-server session. That is useful for trusted/local integrations, but it is a weak fit for a normal public multi-user SaaS deployment because:
+
+- the backend owns one local Codex runtime session rather than a normal per-user web auth system
+- browser callback semantics are easiest when the backend and user are in a trusted/local environment
+- scaling a workstation-style auth/session model across containers and stateless instances is operationally awkward
+- deployment environments generally want explicit backend-managed credentials, not app-local interactive login state
+
+That is why `openaiApi` remains the recommended production runtime path.
+
+## Why Provider Swapping Is Safe
+
+The journal service does not know whether analysis comes from Codex or OpenAI.
+
+It only asks the active provider runtime for:
+
+- current provider
+- provider health
+- `analyzeJournal(text)`
+
+That keeps:
+
+- auth logic inside the Codex adapter
+- API-key logic inside the OpenAI adapter
+- journal storage and insight computation independent from provider choice
+
+## Request Flow
+
+### Create entry
+
+1. frontend calls `POST /api/journal`
+2. server validates input with Zod
+3. repository writes the entry to SQLite
+4. created entry is returned with `201`
+
+### Analyze entry
+
+1. frontend calls `POST /api/journal/analyze`
+2. server validates input
+3. service checks:
+   - existing analysis on the requested entry
+   - cached analysis by normalized `textHash`
+4. if cached:
+   - return cached result immediately
+   - attach cached result to the entry when `journalEntryId` is present
+5. if not cached:
+   - call the currently selected AI provider
+   - validate strict JSON output
+   - persist the result
+6. return `emotion`, `keywords`, `summary`
+
+### Insights
+
+`GET /api/journal/insights/:userId` computes:
+
+- `totalEntries`
+- `topEmotion`
+- `mostUsedAmbience`
+- `recentKeywords`
+
+It reuses stored analyses and never re-calls the AI provider.
+
+## API Contract
+
+Success:
+
+- `POST /api/journal` -> `201`
+- `GET` endpoints -> `200`
+- `POST /api/journal/analyze` -> `200`
+
+Failure:
+
+- `400` invalid input
+- `404` missing referenced entry or login id
+- `500` provider/runtime/server failures
+
+Error body:
+
+```json
+{
+  "error": {
+    "code": "SOME_CODE",
+    "message": "Human-readable message"
+  }
+}
+```
+
+## 1. How Would This Scale To 100k Users?
+
+The current code is intentionally small, but the next production step is straightforward:
+
+- move from SQLite to PostgreSQL
+- add indexes on:
+  - `JournalEntry(userId, createdAt desc)`
   - `JournalAnalysis(journalEntryId)`
   - `JournalAnalysis(textHash)`
-- Split synchronous write paths from heavier analysis work.
-  - `POST /api/journal` stays fast and only writes the entry.
-  - analysis can move to a queue-backed worker for async processing at higher volume.
-- Containerize the server and run multiple stateless API replicas behind a load balancer.
-- Add Redis for hot insight caching and rate limiting.
-- Introduce background materialization for expensive aggregates if insight queries grow beyond simple per-user scans.
-- Add observability:
-  - request latency
-  - error rate
-  - LLM usage and failure rate
-  - queue lag if async analysis is added
+- make `POST /api/journal` synchronous and cheap
+- move analysis execution to a queue-backed worker pool
+- run multiple stateless API replicas behind a load balancer
+- store hot per-user insights and rate-limit counters in Redis
+- add observability for latency, queue lag, provider failure rate, and cost
 
-The current code is intentionally small, but the separation between transport, business logic, and persistence is already in place, so moving from local SQLite to horizontally scaled API instances is straightforward.
+For the Codex ChatGPT mode specifically, I would not scale it as the primary public provider. I would keep that flow for local/trusted operator environments and use `openaiApi` or another server-managed provider for scalable multi-instance deployments.
 
 ## 2. How Would LLM Cost Be Reduced?
-I would reduce cost in layers:
 
-- Reuse prior analyses by hashing normalized journal text before any LLM call.
-- Persist analyses to entries so insight generation never needs to re-call the model.
-- Use a smaller model for first-pass extraction because this task only needs structured emotion, keywords, and summary output.
-- Add heuristics to skip re-analysis when an entry already has an analysis and the text has not changed.
-- Batch or queue analysis so retries and backoff are controlled centrally.
-- Add per-user or per-IP rate limiting on the analyze endpoint.
-- Cache failure states briefly to avoid hammering the provider during outages.
+Current implementation already reduces cost by:
 
-If usage increased substantially, I would also consider offline reprocessing jobs and prompt compression to shrink token usage.
+- hashing normalized text before any provider call
+- reusing cached raw-text analyses
+- storing analyses on entries
+- computing insights from stored rows only
+
+Further cost controls:
+
+- async queueing with centralized retries
+- per-user rate limiting
+- smaller structured-output models for extraction tasks
+- batch reprocessing jobs outside the request path
+- prompt compression and schema-first extraction
 
 ## 3. How Would Repeated Analysis Be Cached?
-The current implementation already does this with persisted storage:
 
-- Normalize and hash the input text with SHA-256.
-- Look for an existing `JournalAnalysis` row with the same `textHash`.
-- If a match exists:
-  - return that result immediately
-  - copy the analysis onto the requested journal entry when `journalEntryId` is provided
-- Only call the LLM when the hash is not already known
+Current flow:
 
-For larger scale, I would add a dedicated cache table or Redis layer keyed by `textHash`, with the database remaining the source of truth.
+1. normalize text
+2. compute SHA-256 `textHash`
+3. check `JournalAnalysis` for the same hash
+4. if found, return cached analysis without re-running Codex or OpenAI
+5. if `journalEntryId` is present, attach the cached result to that entry
+
+This means repeated analysis requests reuse persisted results across:
+
+- raw text analysis
+- stored journal entries
+- insight queries
+
+For larger scale, Redis can sit in front of the database, but the database remains the source of truth.
 
 ## 4. How Would Sensitive Journal Data Be Protected?
-Sensitive journaling data needs stronger controls than this local assignment setup. In production I would add:
 
-- Authentication and authorization so users can only access their own entries.
-- Encryption at rest for the primary database and encrypted backups.
-- TLS in transit for all client, server, and provider traffic.
-- Secrets stored in a secret manager rather than plaintext env files.
-- Audit logging for admin access and support tooling.
-- Redaction and structured logging so raw journal text is never dumped into request logs.
-- Data retention controls and hard-delete workflows for privacy requests.
-- Optional field-level encryption for journal text if the threat model requires it.
-- Strict vendor review and data processing controls for any external LLM provider.
+For a real production system:
 
-The current implementation keeps sensitive data local in SQLite and avoids fake processing, but it does not include authentication because that is outside the assignment scope.
+- add authentication and authorization so callers can access only their own journals
+- encrypt the primary database and backups
+- enforce TLS everywhere
+- keep secrets in a secret manager, not checked-in env files
+- redact raw journal text from logs and traces
+- add audit logging for support/admin access
+- support deletion and retention controls
+- use strict vendor review for external AI providers
+- consider field-level encryption for journal text if the threat model requires it
+
+For this assignment:
+
+- secrets remain backend-only
+- the frontend never receives provider credentials or auth artifacts
+- Codex auth files are not stored in the repo
+- cached analyses are persisted locally in SQLite
+
+## Pre-production Checklist
+
+- set `AI_PROVIDER="openaiApi"`
+- set `CODEX_PROVIDER_ENABLED="false"` unless you explicitly want the local/trusted Codex flow
+- configure `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `LLM_MODEL`
+- verify no local auth artifacts or copied secrets are committed
+- run `npm run verify:endpoints`
+- run `npm test`
+- run `npm run build`

@@ -19,6 +19,11 @@ const cachedAnalysis = {
 };
 
 async function main() {
+  const previousProvider = env.AI_PROVIDER;
+  const previousCodexEnabled = env.CODEX_PROVIDER_ENABLED;
+  env.AI_PROVIDER = 'openaiApi';
+  env.CODEX_PROVIDER_ENABLED = false;
+
   await resetVerifyData();
 
   const app = createApp();
@@ -33,6 +38,9 @@ async function main() {
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
   try {
+    await verifyProviderState(baseUrl);
+    await verifyCodexAccountState(baseUrl);
+    await verifyCodexLoginStartFailsClearlyWhenDisabled(baseUrl);
     const createdEntry = await verifyCreateEntry(baseUrl);
     await verifyInvalidCreateEntry(baseUrl);
     const analyzedEntry = await verifyAnalyzeSuccessViaCache(baseUrl);
@@ -43,6 +51,8 @@ async function main() {
 
     console.log('Endpoint verification passed.');
   } finally {
+    env.AI_PROVIDER = previousProvider;
+    env.CODEX_PROVIDER_ENABLED = previousCodexEnabled;
     await new Promise<void>((resolve, reject) => {
       server.close((error) => {
         if (error) {
@@ -55,6 +65,36 @@ async function main() {
     });
     await prisma.$disconnect();
   }
+}
+
+async function verifyProviderState(baseUrl: string) {
+  const response = await apiRequest(baseUrl, '/api/ai/provider');
+
+  assert.equal(response.status, 200, 'GET /api/ai/provider should return 200.');
+  assert.equal(response.json.activeProvider, 'openaiApi');
+  assert.ok(Array.isArray(response.json.providers), 'Provider list should be returned.');
+}
+
+async function verifyCodexAccountState(baseUrl: string) {
+  const response = await apiRequest(baseUrl, '/api/auth/codex/account');
+
+  assert.equal(response.status, 200, 'GET /api/auth/codex/account should return 200.');
+  assert.equal(response.json.available, false);
+  assert.equal(response.json.authStatus, 'unavailable');
+}
+
+async function verifyCodexLoginStartFailsClearlyWhenDisabled(baseUrl: string) {
+  const response = await apiRequest(baseUrl, '/api/auth/codex/start', {
+    method: 'POST'
+  });
+
+  assert.equal(response.status, 500, 'Disabled Codex login should return 500.');
+  assert.deepEqual(response.json, {
+    error: {
+      code: 'CODEX_PROVIDER_UNAVAILABLE',
+      message: 'Codex ChatGPT provider is disabled. Set CODEX_PROVIDER_ENABLED=true to enable it.'
+    }
+  });
 }
 
 async function verifyCreateEntry(baseUrl: string) {

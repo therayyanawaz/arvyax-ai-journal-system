@@ -12,6 +12,7 @@
 - `npm run db:generate`
 - `npm run db:migrate`
 - `npm run seed`
+- `npm run verify:endpoints`
 - `npm test`
 - `npm run build`
 - `npm run dev`
@@ -25,9 +26,13 @@
 - Preserve strict TypeScript settings and keep imports working in ESM mode
 - Keep UI simple and functional; do not add unnecessary abstractions
 - Update docs when scripts, env vars, or behavior change
+- Keep `AI_PROVIDER=openaiApi` as the deployment default
+- Treat `AI_PROVIDER=codexChatgpt` as a trusted/local Codex app-server integration, not the default public SaaS path
 
 ## Priorities
 `correctness > simplicity > polish`
 
 ## LLM Rule
 Never return fake, hardcoded, or placeholder LLM analysis output. If the model is unavailable or configuration is missing, return a real error response instead.
+
+Never return fake LLM output for Codex browser-login mode either. If the bundled Codex app-server adapter is unavailable or the user is not signed in with ChatGPT, return a real error response instead.

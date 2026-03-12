@@ -3,13 +3,33 @@ import request from 'supertest';
 import { createApp } from '../app.js';
 import { env } from '../config/env.js';
 import { prisma } from '../lib/prisma.js';
-import { AnalysisService } from '../services/analysisService.js';
 import { hashText } from '../utils/hash.js';
 
 describe('journal api', () => {
+  const originalEnv = {
+    AI_PROVIDER: env.AI_PROVIDER,
+    CODEX_PROVIDER_ENABLED: env.CODEX_PROVIDER_ENABLED,
+    OPENAI_API_KEY: env.OPENAI_API_KEY,
+    OPENAI_BASE_URL: env.OPENAI_BASE_URL,
+    LLM_MODEL: env.LLM_MODEL
+  };
+
   beforeEach(async () => {
+    env.AI_PROVIDER = 'openaiApi';
+    env.CODEX_PROVIDER_ENABLED = false;
+    env.OPENAI_API_KEY = originalEnv.OPENAI_API_KEY;
+    env.OPENAI_BASE_URL = originalEnv.OPENAI_BASE_URL;
+    env.LLM_MODEL = originalEnv.LLM_MODEL;
     await prisma.journalAnalysis.deleteMany();
     await prisma.journalEntry.deleteMany();
+  });
+
+  afterEach(() => {
+    env.AI_PROVIDER = originalEnv.AI_PROVIDER;
+    env.CODEX_PROVIDER_ENABLED = originalEnv.CODEX_PROVIDER_ENABLED;
+    env.OPENAI_API_KEY = originalEnv.OPENAI_API_KEY;
+    env.OPENAI_BASE_URL = originalEnv.OPENAI_BASE_URL;
+    env.LLM_MODEL = originalEnv.LLM_MODEL;
   });
 
   it('creates a journal entry', async () => {
@@ -85,9 +105,9 @@ describe('journal api', () => {
   });
 
   it('returns 500 with the standard error shape when analysis is requested without llm env vars', async () => {
-    delete process.env.OPENAI_API_KEY;
-    delete process.env.OPENAI_BASE_URL;
-    delete process.env.LLM_MODEL;
+    env.OPENAI_API_KEY = undefined;
+    env.OPENAI_BASE_URL = undefined;
+    env.LLM_MODEL = undefined;
 
     const response = await request(createApp()).post('/api/journal/analyze').send({
       text: 'I felt calm today after listening to the rain.'
@@ -103,9 +123,9 @@ describe('journal api', () => {
   });
 
   it('returns 404 when a referenced journal entry is missing during analysis', async () => {
-    delete process.env.OPENAI_API_KEY;
-    delete process.env.OPENAI_BASE_URL;
-    delete process.env.LLM_MODEL;
+    env.OPENAI_API_KEY = undefined;
+    env.OPENAI_BASE_URL = undefined;
+    env.LLM_MODEL = undefined;
 
     const response = await request(createApp()).post('/api/journal/analyze').send({
       journalEntryId: 'missing-entry-id',
@@ -148,9 +168,9 @@ describe('journal api', () => {
       }
     });
 
-    delete process.env.OPENAI_API_KEY;
-    delete process.env.OPENAI_BASE_URL;
-    delete process.env.LLM_MODEL;
+    env.OPENAI_API_KEY = undefined;
+    env.OPENAI_BASE_URL = undefined;
+    env.LLM_MODEL = undefined;
 
     const response = await request(createApp()).post('/api/journal/analyze').send({
       journalEntryId: secondEntry.id,
@@ -175,48 +195,42 @@ describe('journal api', () => {
   });
 
   it('persists raw text analysis results using the text hash cache when llm analysis succeeds', async () => {
-    const originalEnv = {
-      OPENAI_API_KEY: env.OPENAI_API_KEY,
-      OPENAI_BASE_URL: env.OPENAI_BASE_URL,
-      LLM_MODEL: env.LLM_MODEL
-    };
-
-    env.OPENAI_API_KEY = 'test-key';
-    env.OPENAI_BASE_URL = 'https://example.com/v1';
-    env.LLM_MODEL = 'test-model';
-
-    const llmSpy = vi
-      .spyOn(AnalysisService.prototype as never, 'requestAnalysisFromLlm' as never)
-      .mockResolvedValue({
-        emotion: 'calm',
-        keywords: ['rain', 'peace', 'nature'],
-        summary: 'The entry reflects calm after a nature session.'
-      });
-
-    try {
-      const text = 'I felt calm today after listening to the rain.';
-      const response = await request(createApp()).post('/api/journal/analyze').send({ text });
-
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({
-        emotion: 'calm',
-        keywords: ['rain', 'peace', 'nature'],
-        summary: 'The entry reflects calm after a nature session.'
-      });
-
-      const cachedAnalysis = await prisma.journalAnalysis.findFirst({
-        where: {
-          textHash: hashText(text)
+    const text = 'I felt calm today after listening to the rain.';
+    const response = await request(
+      createApp({
+        aiProvider: {
+          name: 'openaiApi',
+          label: 'OpenAI API',
+          getHealth: vi.fn().mockResolvedValue({
+            available: true,
+            ready: true,
+            reason: null
+          }),
+          analyzeJournal: vi.fn().mockResolvedValue({
+            emotion: 'calm',
+            keywords: ['rain', 'peace', 'nature'],
+            summary: 'The entry reflects calm after a nature session.'
+          })
         }
-      });
+      })
+    )
+      .post('/api/journal/analyze')
+      .send({ text });
 
-      expect(cachedAnalysis?.journalEntryId ?? null).toBeNull();
-      expect(cachedAnalysis?.emotion).toBe('calm');
-    } finally {
-      llmSpy.mockRestore();
-      env.OPENAI_API_KEY = originalEnv.OPENAI_API_KEY;
-      env.OPENAI_BASE_URL = originalEnv.OPENAI_BASE_URL;
-      env.LLM_MODEL = originalEnv.LLM_MODEL;
-    }
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      emotion: 'calm',
+      keywords: ['rain', 'peace', 'nature'],
+      summary: 'The entry reflects calm after a nature session.'
+    });
+
+    const cachedAnalysis = await prisma.journalAnalysis.findFirst({
+      where: {
+        textHash: hashText(text)
+      }
+    });
+
+    expect(cachedAnalysis?.journalEntryId ?? null).toBeNull();
+    expect(cachedAnalysis?.emotion).toBe('calm');
   });
 });

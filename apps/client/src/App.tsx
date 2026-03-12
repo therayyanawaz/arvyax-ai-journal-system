@@ -27,6 +27,47 @@ type Insights = {
   recentKeywords: string[];
 };
 
+type ProviderStatus = {
+  name: 'openaiApi' | 'codexChatgpt';
+  label: string;
+  selected: boolean;
+  available: boolean;
+  ready: boolean;
+  reason: string | null;
+};
+
+type ProviderState = {
+  activeProvider: ProviderStatus['name'];
+  providers: ProviderStatus[];
+};
+
+type CodexAccountStatus = {
+  enabled: boolean;
+  available: boolean;
+  ready: boolean;
+  authStatus: 'unavailable' | 'signed-out' | 'signing-in' | 'signed-in' | 'error';
+  authMode: 'apikey' | 'chatgpt' | 'chatgptAuthTokens' | null;
+  email: string | null;
+  planType: string | null;
+  requiresOpenaiAuth: boolean | null;
+  rateLimits: {
+    primary?: {
+      usedPercent?: number | null;
+      windowDurationMins?: number | null;
+      resetsAt?: number | null;
+    } | null;
+  } | null;
+  availabilityReason: string | null;
+  activeLoginId: string | null;
+};
+
+type LoginStatus = {
+  loginId: string;
+  status: 'pending' | 'success' | 'error';
+  error: string | null;
+  authUrl: string | null;
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000';
 const ambienceOptions = ['forest', 'ocean', 'mountain'];
 
@@ -37,17 +78,44 @@ const emptyInsights: Insights = {
   recentKeywords: []
 };
 
+const emptyProviderState: ProviderState = {
+  activeProvider: 'openaiApi',
+  providers: []
+};
+
+const emptyCodexAccount: CodexAccountStatus = {
+  enabled: false,
+  available: false,
+  ready: false,
+  authStatus: 'unavailable',
+  authMode: null,
+  email: null,
+  planType: null,
+  requiresOpenaiAuth: null,
+  rateLimits: null,
+  availabilityReason: null,
+  activeLoginId: null
+};
+
 export default function App() {
   const [userId, setUserId] = useState('123');
   const [ambience, setAmbience] = useState('forest');
   const [text, setText] = useState('');
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [insights, setInsights] = useState<Insights>(emptyInsights);
+  const [providerState, setProviderState] = useState<ProviderState>(emptyProviderState);
+  const [codexAccount, setCodexAccount] = useState<CodexAccountStatus>(emptyCodexAccount);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isEntriesLoading, setIsEntriesLoading] = useState(false);
   const [isInsightsLoading, setIsInsightsLoading] = useState(false);
+  const [isProviderLoading, setIsProviderLoading] = useState(false);
+  const [isAuthActionLoading, setIsAuthActionLoading] = useState(false);
   const [analyzingEntryId, setAnalyzingEntryId] = useState<string | null>(null);
+  const [pendingLoginId, setPendingLoginId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const analyzedCount = useMemo(() => entries.filter((entry) => entry.analysis).length, [entries]);
+  const codexProvider = providerState.providers.find((provider) => provider.name === 'codexChatgpt');
 
   async function request<T>(path: string, init?: RequestInit) {
     const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -101,6 +169,21 @@ export default function App() {
     }
   }
 
+  async function loadProviderState() {
+    setIsProviderLoading(true);
+    try {
+      const data = await request<ProviderState>('/api/ai/provider');
+      setProviderState(data);
+    } finally {
+      setIsProviderLoading(false);
+    }
+  }
+
+  async function loadCodexAccount() {
+    const data = await request<CodexAccountStatus>('/api/auth/codex/account');
+    setCodexAccount(data);
+  }
+
   async function refreshUserData(currentUserId: string) {
     try {
       setErrorMessage(null);
@@ -109,6 +192,18 @@ export default function App() {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to load journal data.');
     }
   }
+
+  async function refreshAiState() {
+    try {
+      await Promise.all([loadProviderState(), loadCodexAccount()]);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to load AI provider state.');
+    }
+  }
+
+  useEffect(() => {
+    void refreshAiState();
+  }, []);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -120,9 +215,49 @@ export default function App() {
     };
   }, [userId]);
 
-  const analyzedCount = useMemo(() => {
-    return entries.filter((entry) => entry.analysis).length;
-  }, [entries]);
+  useEffect(() => {
+    if (!pendingLoginId) {
+      return;
+    }
+
+    const poll = async () => {
+      try {
+        const status = await request<LoginStatus>(
+          `/api/auth/codex/status/${encodeURIComponent(pendingLoginId)}`
+        );
+
+        if (status.status === 'pending') {
+          setCodexAccount((current) => ({
+            ...current,
+            authStatus: 'signing-in',
+            activeLoginId: status.loginId
+          }));
+          return;
+        }
+
+        setPendingLoginId(null);
+        await refreshAiState();
+
+        if (status.status === 'error') {
+          setErrorMessage(status.error ?? 'Codex ChatGPT login failed.');
+        }
+      } catch (error) {
+        setPendingLoginId(null);
+        setErrorMessage(
+          error instanceof Error ? error.message : 'Failed to poll Codex login status.'
+        );
+      }
+    };
+
+    void poll();
+    const intervalId = window.setInterval(() => {
+      void poll();
+    }, 2000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [pendingLoginId]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -168,10 +303,70 @@ export default function App() {
       });
 
       await refreshUserData(entry.userId);
+      await refreshAiState();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to analyze entry.');
     } finally {
       setAnalyzingEntryId(null);
+    }
+  }
+
+  async function handleProviderChange(provider: ProviderStatus['name']) {
+    setErrorMessage(null);
+
+    try {
+      const data = await request<ProviderState>('/api/ai/provider', {
+        method: 'POST',
+        body: JSON.stringify({ provider })
+      });
+      setProviderState(data);
+      await loadCodexAccount();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to switch AI provider.');
+    }
+  }
+
+  async function handleCodexSignIn() {
+    setIsAuthActionLoading(true);
+    setErrorMessage(null);
+
+    try {
+      const data = await request<{ loginId: string; authUrl: string }>('/api/auth/codex/start', {
+        method: 'POST'
+      });
+
+      setPendingLoginId(data.loginId);
+      setCodexAccount((current) => ({
+        ...current,
+        authStatus: 'signing-in',
+        activeLoginId: data.loginId
+      }));
+
+      const popup = window.open(data.authUrl, '_blank', 'noopener,noreferrer');
+      if (!popup) {
+        setErrorMessage('Browser blocked the ChatGPT login window. Allow popups and try again.');
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to start Codex login.');
+    } finally {
+      setIsAuthActionLoading(false);
+    }
+  }
+
+  async function handleCodexLogout() {
+    setIsAuthActionLoading(true);
+    setErrorMessage(null);
+
+    try {
+      await request<{ success: boolean }>('/api/auth/codex/logout', {
+        method: 'POST'
+      });
+      setPendingLoginId(null);
+      await refreshAiState();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to log out of Codex.');
+    } finally {
+      setIsAuthActionLoading(false);
     }
   }
 
@@ -188,6 +383,16 @@ export default function App() {
         </div>
 
         <div className="hero-panel">
+          <div className="section-heading compact-heading">
+            <div>
+              <p className="eyebrow">AI Runtime</p>
+              <h2>Provider and ChatGPT session</h2>
+            </div>
+            <span className={`status-badge status-${codexAccount.authStatus}`}>
+              {formatAuthStatus(codexAccount.authStatus)}
+            </span>
+          </div>
+
           <label className="field">
             <span>User ID</span>
             <input
@@ -196,6 +401,78 @@ export default function App() {
               placeholder="Enter a user ID"
             />
           </label>
+
+          <label className="field">
+            <span>AI Provider</span>
+            <select
+              value={providerState.activeProvider}
+              onChange={(event) =>
+                void handleProviderChange(event.target.value as ProviderStatus['name'])
+              }
+              disabled={isProviderLoading}
+            >
+              {providerState.providers.map((provider) => (
+                <option key={provider.name} value={provider.name} disabled={!provider.available}>
+                  {provider.label}
+                  {!provider.available ? ' (Unavailable)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="provider-meta">
+            <p className="muted">
+              Active provider:{' '}
+              <strong>{providerState.providers.find((provider) => provider.selected)?.label ?? '...'}</strong>
+            </p>
+            {providerState.providers.map((provider) =>
+              provider.reason ? (
+                <p className="muted" key={provider.name}>
+                  {provider.label}: {provider.reason}
+                </p>
+              ) : null
+            )}
+          </div>
+
+          <div className="auth-card">
+            <div>
+              <strong>Sign in with ChatGPT</strong>
+              <p className="muted">
+                OpenClaw-style browser login backed by the official Codex app-server session flow.
+              </p>
+            </div>
+
+            <div className="button-row">
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => void handleCodexSignIn()}
+                disabled={
+                  isAuthActionLoading ||
+                  !codexProvider?.available ||
+                  codexAccount.authStatus === 'signing-in'
+                }
+              >
+                {codexAccount.authStatus === 'signing-in' ? 'Waiting for login...' : 'Sign in with ChatGPT'}
+              </button>
+
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => void handleCodexLogout()}
+                disabled={isAuthActionLoading || codexAccount.authStatus !== 'signed-in'}
+              >
+                Sign out
+              </button>
+            </div>
+
+            <div className="account-meta">
+              <span>Email</span>
+              <strong>{codexAccount.email ?? 'Not signed in'}</strong>
+              <span>Plan</span>
+              <strong>{codexAccount.planType ?? 'Unknown'}</strong>
+            </div>
+          </div>
 
           <div className="metrics">
             <article>
@@ -364,3 +641,17 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function formatAuthStatus(value: CodexAccountStatus['authStatus']) {
+  switch (value) {
+    case 'signed-in':
+      return 'Signed in';
+    case 'signing-in':
+      return 'Signing in';
+    case 'error':
+      return 'Error';
+    case 'signed-out':
+      return 'Not signed in';
+    default:
+      return 'Unavailable';
+  }
+}
