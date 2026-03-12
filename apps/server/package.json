@@ -1,0 +1,38 @@
+{
+  "name": "@arvyax/server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "prisma generate && tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "test": "prisma generate && vitest run",
+    "test:watch": "vitest",
+    "seed": "tsx src/scripts/seed.ts",
+    "verify:endpoints": "tsx src/scripts/verifyEndpoints.ts",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev --name init --skip-generate",
+    "db:studio": "prisma studio",
+    "db:push:test": "prisma db push --force-reset --skip-generate"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.2",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.1",
+    "openai": "^6.27.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/supertest": "^7.2.0",
+    "prisma": "^6.19.2",
+    "supertest": "^7.2.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}

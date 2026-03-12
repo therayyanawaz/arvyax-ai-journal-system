@@ -1,0 +1,32 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model JournalEntry {
+  id         String           @id @default(cuid())
+  userId     String
+  ambience   String
+  text       String
+  createdAt  DateTime         @default(now())
+  analysis   JournalAnalysis?
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model JournalAnalysis {
+  id             String       @id @default(cuid())
+  journalEntryId String?      @unique
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  emotion        String
+  keywordsJson   String
+  summary        String
+  textHash       String
+  createdAt      DateTime     @default(now())
+
+  @@index([textHash])
+}
