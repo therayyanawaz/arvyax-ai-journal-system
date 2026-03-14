@@ -134,12 +134,10 @@ export class CodexAppServerClient implements CodexAppServerAdapter {
       });
     }
 
-    const runtimeAvailable = !(this.lastRuntimeError && !this.child);
-
     return codexAvailabilitySchema.parse({
       enabled: true,
-      available: runtimeAvailable,
-      reason: runtimeAvailable ? this.availabilityReason : this.lastRuntimeError
+      available: true,
+      reason: this.lastRuntimeError ?? this.availabilityReason
     });
   }
 
@@ -804,6 +802,7 @@ export class CodexAppServerClient implements CodexAppServerAdapter {
   private handleProcessExit(message: string) {
     this.lastRuntimeError = message;
     this.availabilityReason = message;
+    this.startupPromise = null;
 
     for (const [id, pending] of this.pendingRequests.entries()) {
       clearTimeout(pending.timeout);
