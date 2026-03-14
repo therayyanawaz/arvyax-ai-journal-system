@@ -233,4 +233,103 @@ describe('journal api', () => {
     expect(cachedAnalysis?.journalEntryId ?? null).toBeNull();
     expect(cachedAnalysis?.emotion).toBe('calm');
   });
+
+  it('deduplicates concurrent analysis requests for the same journal entry', async () => {
+    const entry = await prisma.journalEntry.create({
+      data: {
+        userId: '123',
+        ambience: 'forest',
+        text: 'Rain made me feel calm and centered.'
+      }
+    });
+
+    const analyzeJournal = vi.fn().mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 75));
+      return {
+        emotion: 'calm',
+        keywords: ['rain', 'calm', 'centered'],
+        summary: 'The entry reflects calm after a rainy nature session.'
+      };
+    });
+
+    const app = createApp({
+      aiProvider: {
+        name: 'openaiApi',
+        label: 'OpenAI API',
+        getHealth: vi.fn().mockResolvedValue({
+          available: true,
+          ready: true,
+          reason: null
+        }),
+        analyzeJournal
+      }
+    });
+
+    const payload = {
+      journalEntryId: entry.id,
+      text: entry.text
+    };
+
+    const [firstResponse, secondResponse] = await Promise.all([
+      request(app).post('/api/journal/analyze').send(payload),
+      request(app).post('/api/journal/analyze').send(payload)
+    ]);
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    expect(firstResponse.body).toEqual(secondResponse.body);
+    expect(analyzeJournal).toHaveBeenCalledTimes(1);
+
+    const linkedAnalyses = await prisma.journalAnalysis.count({
+      where: {
+        journalEntryId: entry.id
+      }
+    });
+
+    expect(linkedAnalyses).toBe(1);
+  });
+
+  it('deduplicates concurrent raw-text analysis requests through the cache', async () => {
+    const text = 'Ocean sounds helped me feel calm and clear tonight.';
+    const analyzeJournal = vi.fn().mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 75));
+      return {
+        emotion: 'calm',
+        keywords: ['ocean', 'calm', 'clarity'],
+        summary: 'The entry reflects calm and clarity after an ocean session.'
+      };
+    });
+
+    const app = createApp({
+      aiProvider: {
+        name: 'openaiApi',
+        label: 'OpenAI API',
+        getHealth: vi.fn().mockResolvedValue({
+          available: true,
+          ready: true,
+          reason: null
+        }),
+        analyzeJournal
+      }
+    });
+
+    const [firstResponse, secondResponse] = await Promise.all([
+      request(app).post('/api/journal/analyze').send({ text }),
+      request(app).post('/api/journal/analyze').send({ text })
+    ]);
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    expect(firstResponse.body).toEqual(secondResponse.body);
+    expect(analyzeJournal).toHaveBeenCalledTimes(1);
+
+    const cachedAnalyses = await prisma.journalAnalysis.count({
+      where: {
+        textHash: hashText(text),
+        journalEntryId: null
+      }
+    });
+
+    expect(cachedAnalyses).toBe(1);
+  });
 });

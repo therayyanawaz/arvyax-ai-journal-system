@@ -1,3 +1,5 @@
+import type { JournalAnalysis } from '@prisma/client';
+
 import type { AiProviderRuntime } from '../ai/types.js';
 import { JournalRepository } from '../repositories/journalRepository.js';
 import {
@@ -13,6 +15,8 @@ type AnalyzeInput = {
 };
 
 export class AnalysisService {
+  private readonly inFlightCachedAnalyses = new Map<string, Promise<JournalAnalysis>>();
+
   constructor(
     private readonly repository: JournalRepository,
     private readonly aiRuntime: AiProviderRuntime
@@ -37,46 +41,59 @@ export class AnalysisService {
       }
     }
 
-    const cached = await this.repository.getCachedAnalysis(textHash);
-    if (cached) {
-      if (input.journalEntryId) {
-        const linked = await this.repository.createAnalysis({
-          journalEntryId: input.journalEntryId,
-          emotion: cached.emotion,
-          keywordsJson: cached.keywordsJson,
-          summary: cached.summary,
-          textHash
-        });
-
-        return this.toResponse(linked);
-      }
-
+    const cached = await this.ensureCachedAnalysis(textHash, input.text);
+    if (!input.journalEntryId) {
       return this.toResponse(cached);
     }
 
-    const analysis = await this.aiRuntime.getActiveProvider().analyzeJournal(input.text);
-
-    if (!input.journalEntryId) {
-      const created = await this.repository.createAnalysis({
-        emotion: analysis.emotion,
-        keywordsJson: JSON.stringify(analysis.keywords),
-        summary: analysis.summary,
-        textHash
-      });
-
-      return this.toResponse(created);
-    }
-
-    const created = await this.repository.createAnalysis({
+    const created = await this.repository.createAnalysisForEntryOrGetExisting({
       journalEntryId: input.journalEntryId,
-      emotion: analysis.emotion,
-      keywordsJson: JSON.stringify(analysis.keywords),
-      summary: analysis.summary,
+      emotion: cached.emotion,
+      keywordsJson: cached.keywordsJson,
+      summary: cached.summary,
       textHash
     });
 
     return this.toResponse(created);
   }
+
+  private async ensureCachedAnalysis(textHash: string, text: string): Promise<JournalAnalysis> {
+    const cached = await this.repository.getCachedAnalysis(textHash);
+    if (cached) {
+      return cached;
+    }
+
+    const inFlight = this.inFlightCachedAnalyses.get(textHash);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const analysisPromise = (async () => {
+      const existing = await this.repository.getCachedAnalysis(textHash);
+      if (existing) {
+        return existing;
+      }
+
+      const analysis = await this.aiRuntime.getActiveProvider().analyzeJournal(text);
+      return this.repository.createAnalysis({
+        emotion: analysis.emotion,
+        keywordsJson: JSON.stringify(analysis.keywords),
+        summary: analysis.summary,
+        textHash
+      });
+    })();
+
+    this.inFlightCachedAnalyses.set(textHash, analysisPromise);
+
+    try {
+      return await analysisPromise;
+    } finally {
+      if (this.inFlightCachedAnalyses.get(textHash) === analysisPromise) {
+        this.inFlightCachedAnalyses.delete(textHash);
+      }
+    }
+  }
+
   private toResponse(analysis: {
     emotion: string;
     keywordsJson: string;

@@ -1,4 +1,4 @@
-import type { JournalAnalysis, JournalEntry } from '@prisma/client';
+import { Prisma, type JournalAnalysis, type JournalEntry } from '@prisma/client';
 
 import { prisma } from '../lib/prisma.js';
 
@@ -55,6 +55,37 @@ export class JournalRepository {
     return prisma.journalAnalysis.create({
       data
     });
+  }
+
+  async createAnalysisForEntryOrGetExisting(data: {
+    journalEntryId: string;
+    emotion: string;
+    keywordsJson: string;
+    summary: string;
+    textHash: string;
+  }) {
+    try {
+      return await prisma.journalAnalysis.create({
+        data
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const existing = await prisma.journalAnalysis.findUnique({
+          where: {
+            journalEntryId: data.journalEntryId
+          }
+        });
+
+        if (existing) {
+          return existing;
+        }
+      }
+
+      throw error;
+    }
   }
 
   async clearAll() {
