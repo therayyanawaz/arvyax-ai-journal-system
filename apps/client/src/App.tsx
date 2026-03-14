@@ -1,74 +1,24 @@
-import type { FormEvent } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import React, { type FormEvent, useEffect, useMemo, useState } from 'react';
 
-type Analysis = {
-  emotion: string;
-  keywords: string[];
-  summary: string;
-};
+import { AppShell } from './components/AppShell';
+import { AccountPanel } from './components/AccountPanel';
+import { HeroIntro } from './components/HeroIntro';
+import { InsightsPanel } from './components/InsightsPanel';
+import { JournalComposer } from './components/JournalComposer';
+import { RuntimePanel } from './components/RuntimePanel';
+import { TimelinePanel } from './components/TimelinePanel';
+import type {
+  Analysis,
+  CodexAccountStatus,
+  Insights,
+  JournalEntry,
+  LoginStatus,
+  ProviderState,
+  ProviderStatus
+} from './types';
 
-type JournalEntry = {
-  id: string;
-  userId: string;
-  ambience: string;
-  text: string;
-  createdAt: string;
-  analysis: (Analysis & {
-    id: string;
-    createdAt: string;
-    textHash: string;
-  }) | null;
-};
-
-type Insights = {
-  totalEntries: number;
-  topEmotion: string | null;
-  mostUsedAmbience: string | null;
-  recentKeywords: string[];
-};
-
-type ProviderStatus = {
-  name: 'openaiApi' | 'codexChatgpt';
-  label: string;
-  selected: boolean;
-  available: boolean;
-  ready: boolean;
-  reason: string | null;
-};
-
-type ProviderState = {
-  activeProvider: ProviderStatus['name'];
-  providers: ProviderStatus[];
-};
-
-type CodexAccountStatus = {
-  enabled: boolean;
-  available: boolean;
-  ready: boolean;
-  authStatus: 'unavailable' | 'signed-out' | 'signing-in' | 'signed-in' | 'error';
-  authMode: 'apikey' | 'chatgpt' | 'chatgptAuthTokens' | null;
-  email: string | null;
-  planType: string | null;
-  requiresOpenaiAuth: boolean | null;
-  rateLimits: {
-    primary?: {
-      usedPercent?: number | null;
-      windowDurationMins?: number | null;
-      resetsAt?: number | null;
-    } | null;
-  } | null;
-  availabilityReason: string | null;
-  activeLoginId: string | null;
-};
-
-type LoginStatus = {
-  loginId: string;
-  status: 'pending' | 'success' | 'error';
-  error: string | null;
-  authUrl: string | null;
-};
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000';
+const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
+const API_BASE_URL = viteEnv?.VITE_API_BASE_URL ?? 'http://localhost:4000';
 const ambienceOptions = ['forest', 'ocean', 'mountain'];
 
 const emptyInsights: Insights = {
@@ -115,7 +65,10 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const analyzedCount = useMemo(() => entries.filter((entry) => entry.analysis).length, [entries]);
-  const codexProvider = providerState.providers.find((provider) => provider.name === 'codexChatgpt');
+  const heroSignal =
+    !isInsightsLoading && insights.topEmotion
+      ? `Current thread: ${insights.topEmotion} recurring`
+      : null;
 
   async function request<T>(path: string, init?: RequestInit) {
     const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -371,264 +324,53 @@ export default function App() {
   }
 
   return (
-    <main className="shell">
-      <section className="hero">
-        <div>
-          <p className="eyebrow">ArvyaX AI-Assisted Journal System</p>
-          <h1>Nature sessions, reflective writing, and persistent AI insights.</h1>
-          <p className="hero-copy">
-            Capture what changed after each forest, ocean, or mountain session. Analyze entries
-            with a real LLM, then watch recurring patterns settle across time.
-          </p>
-        </div>
-
-        <div className="hero-panel">
-          <div className="section-heading compact-heading">
-            <div>
-              <p className="eyebrow">AI Runtime</p>
-              <h2>Provider and ChatGPT session</h2>
-            </div>
-            <span className={`status-badge status-${codexAccount.authStatus}`}>
-              {formatAuthStatus(codexAccount.authStatus)}
-            </span>
-          </div>
-
-          <label className="field">
-            <span>User ID</span>
-            <input
-              value={userId}
-              onChange={(event) => setUserId(event.target.value)}
-              placeholder="Enter a user ID"
-            />
-          </label>
-
-          <label className="field">
-            <span>AI Provider</span>
-            <select
-              value={providerState.activeProvider}
-              onChange={(event) =>
-                void handleProviderChange(event.target.value as ProviderStatus['name'])
-              }
-              disabled={isProviderLoading}
-            >
-              {providerState.providers.map((provider) => (
-                <option key={provider.name} value={provider.name} disabled={!provider.available}>
-                  {provider.label}
-                  {!provider.available ? ' (Unavailable)' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div className="provider-meta">
-            <p className="muted">
-              Active provider:{' '}
-              <strong>{providerState.providers.find((provider) => provider.selected)?.label ?? '...'}</strong>
-            </p>
-            {providerState.providers.map((provider) =>
-              provider.reason ? (
-                <p className="muted" key={provider.name}>
-                  {provider.label}: {provider.reason}
-                </p>
-              ) : null
-            )}
-          </div>
-
-          <div className="auth-card">
-            <div>
-              <strong>Sign in with ChatGPT</strong>
-              <p className="muted">
-                OpenClaw-style browser login backed by the official Codex app-server session flow.
-              </p>
-            </div>
-
-            <div className="button-row">
-              <button
-                className="primary-button"
-                type="button"
-                onClick={() => void handleCodexSignIn()}
-                disabled={
-                  isAuthActionLoading ||
-                  !codexProvider?.available ||
-                  codexAccount.authStatus === 'signing-in'
-                }
-              >
-                {codexAccount.authStatus === 'signing-in' ? 'Waiting for login...' : 'Sign in with ChatGPT'}
-              </button>
-
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => void handleCodexLogout()}
-                disabled={isAuthActionLoading || codexAccount.authStatus !== 'signed-in'}
-              >
-                Sign out
-              </button>
-            </div>
-
-            <div className="account-meta">
-              <span>Email</span>
-              <strong>{codexAccount.email ?? 'Not signed in'}</strong>
-              <span>Plan</span>
-              <strong>{codexAccount.planType ?? 'Unknown'}</strong>
-            </div>
-          </div>
-
-          <div className="metrics">
-            <article>
-              <span>Total entries</span>
-              <strong>{isInsightsLoading ? '...' : insights.totalEntries}</strong>
-            </article>
-            <article>
-              <span>Analyzed</span>
-              <strong>{analyzedCount}</strong>
-            </article>
-            <article>
-              <span>Top emotion</span>
-              <strong>{isInsightsLoading ? '...' : insights.topEmotion ?? 'None yet'}</strong>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      {errorMessage ? <div className="banner-error">{errorMessage}</div> : null}
-
-      <section className="layout">
-        <div className="column">
-          <article className="panel">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">New Entry</p>
-                <h2>Write after the session</h2>
-              </div>
-            </div>
-
-            <form className="journal-form" onSubmit={handleSubmit}>
-              <label className="field">
-                <span>Ambience</span>
-                <select value={ambience} onChange={(event) => setAmbience(event.target.value)}>
-                  {ambienceOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="field">
-                <span>Journal entry</span>
-                <textarea
-                  rows={7}
-                  value={text}
-                  onChange={(event) => setText(event.target.value)}
-                  placeholder="What shifted for you during the session?"
-                />
-              </label>
-
-              <button className="primary-button" type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Saving entry...' : 'Create entry'}
-              </button>
-            </form>
-          </article>
-
-          <article className="panel">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">Insights</p>
-                <h2>Aggregated over time</h2>
-              </div>
-            </div>
-
-            <div className="insight-grid">
-              <article className="insight-card">
-                <span>Total entries</span>
-                <strong>{isInsightsLoading ? 'Loading...' : insights.totalEntries}</strong>
-              </article>
-              <article className="insight-card">
-                <span>Most used ambience</span>
-                <strong>{isInsightsLoading ? 'Loading...' : insights.mostUsedAmbience ?? 'None yet'}</strong>
-              </article>
-              <article className="insight-card">
-                <span>Top emotion</span>
-                <strong>{isInsightsLoading ? 'Loading...' : insights.topEmotion ?? 'None yet'}</strong>
-              </article>
-            </div>
-
-            <div className="keyword-row">
-              {(isInsightsLoading ? [] : insights.recentKeywords).map((keyword) => (
-                <span key={keyword} className="pill">
-                  {keyword}
-                </span>
-              ))}
-              {!isInsightsLoading && insights.recentKeywords.length === 0 ? (
-                <p className="muted">Analyze entries to populate recent keywords.</p>
-              ) : null}
-            </div>
-          </article>
-        </div>
-
-        <article className="panel">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Timeline</p>
-              <h2>Previous entries</h2>
-            </div>
-            <span className="muted">{isEntriesLoading ? 'Loading...' : `${entries.length} entries`}</span>
-          </div>
-
-          <div className="entry-list">
-            {!isEntriesLoading && entries.length === 0 ? (
-              <div className="empty-state">No entries found for this user yet.</div>
-            ) : null}
-
-            {entries.map((entry) => (
-              <article className="entry-card" key={entry.id}>
-                <div className="entry-header">
-                  <div>
-                    <span className="entry-ambience">{entry.ambience}</span>
-                    <time>{formatDate(entry.createdAt)}</time>
-                  </div>
-
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={() => void handleAnalyze(entry)}
-                    disabled={analyzingEntryId === entry.id}
-                  >
-                    {analyzingEntryId === entry.id
-                      ? 'Analyzing...'
-                      : entry.analysis
-                        ? 'Analyze again'
-                        : 'Analyze'}
-                  </button>
-                </div>
-
-                <p className="entry-text">{entry.text}</p>
-
-                {entry.analysis ? (
-                  <div className="analysis-box">
-                    <div className="analysis-topline">
-                      <strong>{entry.analysis.emotion}</strong>
-                      <span>{formatDate(entry.analysis.createdAt)}</span>
-                    </div>
-                    <p>{entry.analysis.summary}</p>
-                    <div className="keyword-row">
-                      {entry.analysis.keywords.map((keyword) => (
-                        <span key={`${entry.id}-${keyword}`} className="pill">
-                          {keyword}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <p className="muted">No analysis stored for this entry yet.</p>
-                )}
-              </article>
-            ))}
-          </div>
-        </article>
-      </section>
-    </main>
+    <AppShell
+      errorMessage={errorMessage}
+      leftColumn={
+        <>
+          <HeroIntro signalLine={heroSignal} />
+          <JournalComposer
+            ambience={ambience}
+            ambienceOptions={ambienceOptions}
+            text={text}
+            isSubmitting={isSubmitting}
+            onAmbienceChange={setAmbience}
+            onTextChange={setText}
+            onSubmit={handleSubmit}
+          />
+          <InsightsPanel
+            insights={insights}
+            analyzedCount={analyzedCount}
+            isLoading={isInsightsLoading}
+          />
+        </>
+      }
+      rightColumn={
+        <>
+          <RuntimePanel
+            userId={userId}
+            providerState={providerState}
+            isProviderLoading={isProviderLoading}
+            onUserIdChange={setUserId}
+            onProviderChange={(provider) => void handleProviderChange(provider)}
+          />
+          <AccountPanel
+            providerState={providerState}
+            codexAccount={codexAccount}
+            isAuthActionLoading={isAuthActionLoading}
+            onCodexSignIn={() => void handleCodexSignIn()}
+            onCodexLogout={() => void handleCodexLogout()}
+          />
+          <TimelinePanel
+            entries={entries}
+            isEntriesLoading={isEntriesLoading}
+            analyzingEntryId={analyzingEntryId}
+            onAnalyze={(entry) => void handleAnalyze(entry)}
+            formatDate={formatDate}
+          />
+        </>
+      }
+    />
   );
 }
 
@@ -639,19 +381,4 @@ function formatDate(value: string) {
     hour: 'numeric',
     minute: '2-digit'
   }).format(new Date(value));
-}
-
-function formatAuthStatus(value: CodexAccountStatus['authStatus']) {
-  switch (value) {
-    case 'signed-in':
-      return 'Signed in';
-    case 'signing-in':
-      return 'Signing in';
-    case 'error':
-      return 'Error';
-    case 'signed-out':
-      return 'Not signed in';
-    default:
-      return 'Unavailable';
-  }
 }
