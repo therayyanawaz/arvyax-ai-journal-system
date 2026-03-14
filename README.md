@@ -7,6 +7,32 @@ The project ships with two backend AI providers:
 - `openaiApi`: standard backend API-key integration. This is the recommended production default.
 - `codexChatgpt`: OpenClaw-style browser login using the official Codex app-server account flow. This is designed for trusted/local rich-client style usage, not a public multi-user SaaS default.
 
+## Reviewer Quick Start
+
+Use `openaiApi` as the default review path. It is the simplest backend-only setup and matches the intended assignment flow.
+
+1. Copy `apps/server/.env.example` to `apps/server/.env`.
+2. Keep `AI_PROVIDER="openaiApi"` and `CODEX_PROVIDER_ENABLED="false"`.
+3. Set `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `LLM_MODEL`.
+4. Run:
+
+```bash
+npm install
+npm run db:generate
+npm run db:migrate
+npm run seed
+npm run verify:endpoints
+npm run test
+npm run build
+npm run dev
+```
+
+Notes:
+
+- `npm run verify:endpoints` validates the required assignment routes and error contract without requiring a live LLM call for every step.
+- To manually verify one real `200` analysis response, configure `openaiApi` or enable the optional local `codexChatgpt` flow and sign in with ChatGPT.
+- `codexChatgpt` is implemented and working, but it is intentionally an advanced local/trusted mode, not the default reviewer path.
+
 ## Stack
 
 - Backend: Node.js, Express, TypeScript
@@ -149,7 +175,7 @@ Backend:
 
 - `http://localhost:4000`
 
-## Development-only Screenshots Placeholder
+## Screenshots Placeholder
 
 Add screenshots here before submission if desired:
 
