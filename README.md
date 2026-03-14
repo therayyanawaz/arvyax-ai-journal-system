@@ -5,7 +5,7 @@ A small full-stack journal app for immersive nature sessions. Users can create e
 The project ships with two backend AI providers:
 
 - `openaiApi`: standard backend API-key integration. This is the recommended production default.
-- `codexChatgpt`: OpenClaw-style browser login using the official Codex app-server account flow. This is designed for trusted/local rich-client style usage, not a public multi-user SaaS default.
+- `codexChatgpt`: Browser-based ChatGPT sign-in using the official Codex app-server account flow. This is designed for trusted/local rich-client style usage, not a public multi-user SaaS default.
 
 ## Reviewer Quick Start
 

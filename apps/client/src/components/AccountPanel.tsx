@@ -22,7 +22,7 @@ export function AccountPanel({
   const codexProvider = providerState.providers.find((provider) => provider.name === 'codexChatgpt');
   const helperCopy =
     codexAccount.availabilityReason ??
-    'OpenClaw-style browser login backed by the official Codex app-server session flow.';
+    'Browser-based ChatGPT sign-in backed by the official Codex app-server session flow.';
 
   return (
     <article className="account-panel">

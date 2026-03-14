@@ -61,7 +61,7 @@ The rest of the backend depends on a shared provider interface and runtime selec
 
 ## Codex ChatGPT Browser Login
 
-This app models an OpenClaw-style UX:
+This app models a browser-based trusted-session UX:
 
 1. frontend calls `POST /api/auth/codex/start`
 2. backend sends `account/login/start` with `{ "type": "chatgpt" }`
