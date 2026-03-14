@@ -122,6 +122,7 @@ Backend sample:
 # apps/server/.env
 DATABASE_URL="file:./prisma/dev.db"
 PORT=4000
+CORS_ALLOWED_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
 
 # Safe default for deployments
 AI_PROVIDER="openaiApi"
@@ -133,6 +134,8 @@ OPENAI_API_KEY="sk-your-key"
 OPENAI_BASE_URL="https://api.openai.com/v1"
 LLM_MODEL="gpt-4.1-mini"
 ```
+
+`CORS_ALLOWED_ORIGINS` is a comma-separated allowlist for browser origins. If you leave it empty, the backend only grants CORS access to localhost and `127.0.0.1` browser origins by default.
 
 Frontend sample:
 

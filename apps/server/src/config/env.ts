@@ -25,10 +25,22 @@ const booleanFromEnv = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
+const stringArrayFromEnv = z.preprocess((value) => {
+  if (typeof value !== 'string') {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}, z.array(z.string()));
+
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   PORT: z.coerce.number().int().positive().default(4000),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  CORS_ALLOWED_ORIGINS: stringArrayFromEnv.default([]),
   AI_PROVIDER: aiProviderNameSchema.default('openaiApi'),
   CODEX_PROVIDER_ENABLED: booleanFromEnv.default(false),
   OPENAI_API_KEY: optionalTrimmedString,
